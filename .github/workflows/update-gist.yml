@@ -24,7 +24,7 @@ jobs:
           curl -X PATCH \
             -H "Authorization: token $GH_TOKEN" \
             -H "Content-Type: application/json" \
-            -d '{"files":{"status.json":{"content":"{\"status\":\"${{ steps.extract.outputs.status }}\"}"}}}' \
+            -d '{"files":{"status.json":{"content":"{\"status\":\"${{ steps.extract.outputs.status }}\"}}}' \
             "https://api.github.com/gists/${{ steps.extract.outputs.gist_id }}"
 
       - name: Close issue
