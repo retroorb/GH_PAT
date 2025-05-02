@@ -1,40 +1,13 @@
 name: Update Gist Status
-
 on:
-  # 1. Триггер через API (из фронтенда)
   repository_dispatch:
-    types: [update_gist_status]
-
-  # 2. Ручной запуск (опционально)
-  workflow_dispatch:
-    inputs:
-      status:
-        description: 'Новый статус'
-        required: true
-        default: '🟢 Онлайн'
-
+    types: [update_gist_status] # Должен совпадать с event_type!
 jobs:
-  update_gist:
+  update:
     runs-on: ubuntu-latest
     steps:
-      - name: Update Gist via API
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}  # Ваш токен из Secrets
-          GIST_ID: "68d8009de9ac10f3a8ac010feb6e11c3"         # Замените на ID вашего Gist
-          NEW_STATUS: ${{ github.event.inputs.status || github.event.client_payload.status }}
-        run: |
-          # Формируем JSON для обновления
-          JSON_PAYLOAD=$(jq -n \
-            --arg status "$NEW_STATUS" \
-            '{files: {"status.json": {content: ("{\"status\":\"" + $status + "\"}")}}}'
-          )
-
-          # Отправляем запрос к GitHub API
+      - run: |
           curl -X PATCH \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Accept: application/vnd.github.v3+json" \
-            -H "Content-Type: application/json" \
-            -d "$JSON_PAYLOAD" \
-            "https://api.github.com/gists/$GIST_ID"
-
-          echo "Статус обновлён: $NEW_STATUS"
+            -H "Authorization: token ${{ secrets.GH_PAT }}" \
+            -d '{"files":{"status.json":{"content":"{\"status\":\"${{ github.event.client_payload.status }}\"}"}}}' \
+            https://api.github.com/gists/${{ github.event.client_payload.gist_id }}
