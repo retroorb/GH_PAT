@@ -1,46 +1,28 @@
-name: Update Gist Status
+name: Update Server Status
 
 on:
   issues:
     types: [opened]
 
 jobs:
-  update:
-    if: contains(github.event.issue.body, 'Gist ID:')
+  update_status:
     runs-on: ubuntu-latest
+    if: contains(github.event.issue.body, 'Gist ID:')
+    
     steps:
-      - name: Extract data
+      - name: Extract status data
         id: extract
         run: |
-          GIST_ID=$(grep -oP 'Gist ID: \K.*' <<< "${{ github.event.issue.body }}")
-          STATUS=$(grep -oP 'New Status: \K.*' <<< "${{ github.event.issue.body }}")
+          GIST_ID=$(grep -oP 'Gist ID: \K[^\n]+' <<< "${{ github.event.issue.body }}")
+          STATUS=$(grep -oP 'New Status: \K[^\n]+' <<< "${{ github.event.issue.body }}")
           echo "gist_id=${GIST_ID}" >> $GITHUB_OUTPUT
           echo "status=${STATUS}" >> $GITHUB_OUTPUT
 
-      - name: Get current status and history
-        id: get_history
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          # Получаем текущий Gist
-          RESPONSE=$(curl -s -H "Authorization: token $GH_TOKEN" \
-            "https://api.github.com/gists/${{ steps.extract.outputs.gist_id }}")
-          
-          # Извлекаем текущий статус и историю
-          CURRENT_STATUS=$(echo "$RESPONSE" | jq -r '.files["status.json"].content' | jq -r '.status')
-          HISTORY=$(echo "$RESPONSE" | jq -r '.files["history.json"].content // "[]"' | jq -r '.')
-          
-          # Добавляем новый статус в историю
-          UPDATED_HISTORY=$(echo "$HISTORY" | jq --arg status "$CURRENT_STATUS" --arg timestamp "$(date -u +"%Y-%m-%dT%H:%M:%SZ")" \
-            '. += [{"status": $status, "timestamp": $timestamp}] | .[-10:]') # Ограничиваем до 10 записей
-          
-          echo "current_status=${CURRENT_STATUS}" >> $GITHUB_OUTPUT
-          echo "updated_history=${UPDATED_HISTORY}" >> $GITHUB_OUTPUT
-
       - name: Update Gist
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GIST_TOKEN }}
         run: |
+          # Обновляем status.json
           curl -X PATCH \
             -H "Authorization: token $GH_TOKEN" \
             -H "Content-Type: application/json" \
@@ -48,9 +30,34 @@ jobs:
               "files": {
                 "status.json": {
                   "content": "{\"status\":\"${{ steps.extract.outputs.status }}\"}"
-                },
+                }
+              }
+            }' \
+            "https://api.github.com/gists/${{ steps.extract.outputs.gist_id }}"
+
+      - name: Update history
+        env:
+          GH_TOKEN: ${{ secrets.GIST_TOKEN }}
+        run: |
+          # Получаем текущую историю
+          HISTORY=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/gists/${{ steps.extract.outputs.gist_id }}" | \
+            jq -r '.files["history.json"].content // "[]"')
+          
+          # Добавляем новую запись
+          UPDATED_HISTORY=$(echo "$HISTORY" | \
+            jq --arg status "${{ steps.extract.outputs.status }}" \
+               --arg timestamp "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            '. |= [{"status": $status, "timestamp": $timestamp}] + .[:9]')
+          
+          # Сохраняем обновленную историю
+          curl -X PATCH \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "files": {
                 "history.json": {
-                  "content": ${{ steps.get_history.outputs.updated_history }}
+                  "content": $UPDATED_HISTORY
                 }
               }
             }' \
@@ -58,7 +65,7 @@ jobs:
 
       - name: Close issue
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GIST_TOKEN }}
         run: |
           curl -X PATCH \
             -H "Authorization: token $GH_TOKEN" \
