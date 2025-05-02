@@ -56,42 +56,43 @@ jobs:
     .online { color: green; }
     .offline { color: red; }
     ul { text-align: left; max-width: 400px; margin: 0 auto; }
+    button {
+      padding: 10px 20px;
+      margin-top: 20px;
+      font-size: 16px;
+      cursor: pointer;
+      border: none;
+      border-radius: 4px;
+      color: white;
+      background-color: #007bff;
+    }
+    button:hover {
+      background-color: #0056b3;
+    }
   </style>
 </head>
 <body>
   <h1>Статус сервера</h1>
   <div class="status">$STATUS</div>
+  <button onclick="updateStatus('🟢 Онлайн')">Онлайн</button>
+  <button onclick="updateStatus('🔴 Оффлайн')">Оффлайн</button>
   <h2>История</h2>
   <ul>
 $(jq -r '. | reverse | .[:5][] | "<li>" + .time + ": " + .status + "</li>"' history.json)
   </ul>
-</body>
-</html>
-EOF
-
-      - name: Update Gist files
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}  # Здесь мы используем GitHub Personal Access Token (GH_PAT)
-        run: |
-          curl -X PATCH \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d @- https://api.github.com/gists/$GIST_ID <<EOF
-{
-  "files": {
-    "status.json": { "content": "$(cat status.json | jq -c .)" },
-    "history.json": { "content": "$(cat history.json | jq -c .)" },
-    "status.html": { "content": "$(cat status.html | sed 's/"/\\"/g' | tr '\n' ' ')" }
-  }
-}
-EOF
-
-      - name: Close issue
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}  # Используем GH_PAT для закрытия issue
-        run: |
-          curl -X PATCH \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"state":"closed"}' \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}"
+  <script>
+    const GIST_ID = "375d0163df1ac31e855f24cba9ec952b";  // Gist ID
+    const GH_API_URL = "https://api.github.com/repos/retroorb/gist-status-updater/issues";
+    async function updateStatus(newStatus) {
+      const statusElement = document.querySelector(".status");
+      statusElement.textContent = "Обновление...";
+      try {
+        await fetch(GH_API_URL, {
+          method: 'POST',
+          headers: {
+            'Authorization': 'Bearer YOUR_GITHUB_TOKEN',  // Замените на ваш GitHub Token
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            title: `Status Update: ${newStatus}`,
+            body: `Gist ID: ${GIST_ID}\nNew Status
