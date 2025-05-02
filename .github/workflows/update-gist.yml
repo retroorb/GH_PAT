@@ -17,18 +17,28 @@ jobs:
           echo "gist_id=${GIST_ID}" >> $GITHUB_OUTPUT
           echo "status=${STATUS}" >> $GITHUB_OUTPUT
 
-      - name: Get current status and history
-        id: get_history
+      - name: Update Gist (status.json)
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
-          # Получаем текущий Gist
-          RESPONSE=$(curl -s -H "Authorization: token $GH_TOKEN" \
-            "https://api.github.com/gists/${{ steps.extract.outputs.gist_id }}")
-          
-          # Извлекаем текущий статус и историю
-          CURRENT_STATUS=$(echo "$RESPONSE" | jq -r '.files["status.json"].content' | jq -r '.status')
-          HISTORY=$(echo "$RESPONSE" | jq -r '.files["history.json"].content // "[]"' | jq -r '.')
-          
-          # Добавляем новый статус в историю
-         
+          curl -X PATCH \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "files": {
+                "status.json": {
+                  "content": "{\"status\":\"${{ steps.extract.outputs.status }}\"}"
+                }
+              }
+            }' \
+            "https://api.github.com/gists/${{ steps.extract.outputs.gist_id }}"
+
+      - name: Close issue
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          curl -X PATCH \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"state":"closed"}' \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}"
