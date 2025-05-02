@@ -6,14 +6,13 @@ on:
 
 jobs:
   update-status:
-    if: contains(github.event.issue.body, 'Gist ID:')
     runs-on: ubuntu-latest
 
     steps:
       - name: Extract status info
         id: extract
         run: |
-          GIST_ID=$(echo "${{ github.event.issue.body }}" | grep -oP 'Gist ID: \K.*')
+          GIST_ID="375d0163df1ac31e855f24cba9ec952b"  # Здесь вставьте свой Gist ID
           STATUS=$(echo "${{ github.event.issue.body }}" | grep -oP 'New Status: \K.*')
           echo "GIST_ID=$GIST_ID" >> $GITHUB_ENV
           echo "STATUS=$STATUS" >> $GITHUB_ENV
@@ -23,7 +22,20 @@ jobs:
           curl -s https://gist.githubusercontent.com/${{ github.actor }}/$GIST_ID/raw/status.json -o status.json || echo '{"status":"❔ Неизвестно"}' > status.json
           curl -s https://gist.githubusercontent.com/${{ github.actor }}/$GIST_ID/raw/history.json -o history.json || echo '[]' > history.json
 
-      - name: Update status.json and history.json
+      - name: Check if status has changed
+        id: check_status
+        run: |
+          CURRENT_STATUS=$(cat status.json | jq -r '.status')
+          if [ "$CURRENT_STATUS" == "$STATUS" ]; then
+            echo "Status has not changed, skipping update."
+            echo "skip_update=true" >> $GITHUB_ENV
+          else
+            echo "Status has changed, updating."
+            echo "skip_update=false" >> $GITHUB_ENV
+          fi
+
+      - name: Update status.json and history.json if status changed
+        if: env.skip_update == 'false'
         run: |
           TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
           echo "{\"status\":\"$STATUS\",\"time\":\"$TIMESTAMP\"}" > status.json
@@ -59,7 +71,7 @@ EOF
 
       - name: Update Gist files
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}  # Здесь мы используем GitHub Personal Access Token (GH_PAT)
         run: |
           curl -X PATCH \
             -H "Authorization: token $GH_TOKEN" \
@@ -76,7 +88,7 @@ EOF
 
       - name: Close issue
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}  # Используем GH_PAT для закрытия issue
         run: |
           curl -X PATCH \
             -H "Authorization: token $GH_TOKEN" \
