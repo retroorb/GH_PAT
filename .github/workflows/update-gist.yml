@@ -1,74 +1,61 @@
-name: Update Server Status
+name: Update Gist Status
 
 on:
-  issues:
-    types: [opened]
+  issues:
+    types: [opened]
 
 jobs:
-  update_status:
-    runs-on: ubuntu-latest
-    if: contains(github.event.issue.body, 'Gist ID:')
-    
-    steps:
-      - name: Extract status data
-        id: extract
-        run: |
-          GIST_ID=$(grep -oP 'Gist ID: \K[^\n]+' <<< "${{ github.event.issue.body }}")
-          STATUS=$(grep -oP 'New Status: \K[^\n]+' <<< "${{ github.event.issue.body }}")
-          echo "gist_id=${GIST_ID}" >> $GITHUB_OUTPUT
-          echo "status=${STATUS}" >> $GITHUB_OUTPUT
+  update:
+    if: contains(github.event.issue.body, 'Gist ID:')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract data
+        id: extract
+        run: |
+          GIST_ID=$(grep -oP 'Gist ID: \K.*' <<< "${{ github.event.issue.body }}")
+          STATUS=$(grep -oP 'New Status: \K.*' <<< "${{ github.event.issue.body }}")
+          echo "gist_id=${GIST_ID}" >> $GITHUB_OUTPUT
+          echo "status=${STATUS}" >> $GITHUB_OUTPUT
 
-      - name: Update Gist
-        env:
-          GH_TOKEN: ${{ secrets.GIST_TOKEN }}
-        run: |
-          # Обновляем status.json
-          curl -X PATCH \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "files": {
-                "status.json": {
-                  "content": "{\"status\":\"${{ steps.extract.outputs.status }}\"}"
-                }
-              }
-            }' \
-            "https://api.github.com/gists/${{ steps.extract.outputs.gist_id }}"
+      - name: Get current history
+        id: get_history
+        run: |
+          curl -s "https://gist.githubusercontent.com/${{ github.actor }}/${{ steps.extract.outputs.gist_id }}/raw/history.json" -o history.json || echo "[]" > history.json
+          echo "content<<EOF" >> $GITHUB_ENV
+          echo "$(cat history.json)" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
-      - name: Update history
-        env:
-          GH_TOKEN: ${{ secrets.GIST_TOKEN }}
-        run: |
-          # Получаем текущую историю
-          HISTORY=$(curl -s -H "Authorization: token $GH_TOKEN" \
-            "https://api.github.com/gists/${{ steps.extract.outputs.gist_id }}" | \
-            jq -r '.files["history.json"].content // "[]"')
-          
-          # Добавляем новую запись
-          UPDATED_HISTORY=$(echo "$HISTORY" | \
-            jq --arg status "${{ steps.extract.outputs.status }}" \
-               --arg timestamp "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
-            '. |= [{"status": $status, "timestamp": $timestamp}] + .[:9]')
-          
-          # Сохраняем обновленную историю
-          curl -X PATCH \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "files": {
-                "history.json": {
-                  "content": $UPDATED_HISTORY
-                }
-              }
-            }' \
-            "https://api.github.com/gists/${{ steps.extract.outputs.gist_id }}"
+      - name: Append new entry to history
+        run: |
+          NEW_ENTRY="{\"time\":\"$(date -u +"%Y-%m-%d %H:%M:%S") UTC\",\"status\":\"${{ steps.extract.outputs.status }}\"}"
+          jq ". + [${NEW_ENTRY}]" history.json > new_history.json
 
-      - name: Close issue
-        env:
-          GH_TOKEN: ${{ secrets.GIST_TOKEN }}
-        run: |
-          curl -X PATCH \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"state":"closed"}' \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}"
+      - name: Update Gist files
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          curl -X PATCH \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d @- https://api.github.com/gists/${{ steps.extract.outputs.gist_id }} <<EOF
+            {
+              "files": {
+                "status.json": {
+                  "content": "{\"status\":\"${{ steps.extract.outputs.status }}\"}"
+                },
+                "history.json": {
+                  "content": "$(cat new_history.json | jq -c .)"
+                }
+              }
+            }
+EOF
+
+      - name: Close issue
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          curl -X PATCH \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"state":"closed"}' \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}"
