@@ -1,13 +1,14 @@
-name: Update Gist Status
+name: Update Gist
 on:
   repository_dispatch:
-    types: [update_gist_status] # Должен совпадать с event_type!
+    types: [update_gist_status]
 jobs:
   update:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - run: |
           curl -X PATCH \
             -H "Authorization: token ${{ secrets.GH_PAT }}" \
             -d '{"files":{"status.json":{"content":"{\"status\":\"${{ github.event.client_payload.status }}\"}"}}}' \
-            https://api.github.com/gists/${{ github.event.client_payload.gist_id }}
+            https://api.github.com/gists/ВАШ_GIST_ID
