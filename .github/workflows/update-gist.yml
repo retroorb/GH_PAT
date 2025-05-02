@@ -20,7 +20,7 @@ jobs:
       - name: Update Gist via API
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}  # Ваш токен из Secrets
-          GIST_ID: "68d8009de9ac10f3a8ac010feb6e11c3 "         # Замените на ID вашего Gist
+          GIST_ID: "375d0163df1ac31e855f24cba9ec952b"         # Замените на ID вашего Gist
           NEW_STATUS: ${{ github.event.inputs.status || github.event.client_payload.status }}
         run: |
           # Формируем JSON для обновления
