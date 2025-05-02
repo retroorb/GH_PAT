@@ -3,8 +3,8 @@ name: Обновление статуса сервера
 on:
   push:
     branches:
-      - main  # Ветка, на которую пушатся изменения
-  workflow_dispatch:  # Позволяет запускать workflow вручную через интерфейс GitHub
+      - main
+  workflow_dispatch:
 
 jobs:
   update-status:
@@ -15,27 +15,58 @@ jobs:
 
       - name: Настроить GitHub Token
         env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}  # Убедитесь, что ваш токен сохранён в GitHub Secrets как GH_PAT
+          GH_TOKEN: ${{ secrets.GH_PAT }}  # Токен хранится в GitHub Secrets как GH_PAT
         run: |
           echo "GH_TOKEN=$GH_TOKEN" >> $GITHUB_ENV
 
       - name: Обновить статус в Gist
         run: |
-          curl -X PATCH "https://api.github.com/gists/375d0163df1ac31e855f24cba9ec952b" \
-          -H "Authorization: Bearer $GH_TOKEN" \
-          -d '{
-                "files": {
-                  "status.json": {
-                    "content": "{\"status\": \"🟢 Онлайн\"}"
-                  },
-                  "history.json": {
-                    "content": "[{\"status\": \"🟢 Онлайн\", \"time\": \"'$(date -Iseconds)'\"}]"
-                  }
-                }
-              }'
+          echo "Обновление статуса в Gist..."
+          
+          # Проверка токена
+          echo "Используем токен: $GH_TOKEN"
+          
+          # Загружаем текущие данные из Gist
+          gist_data=$(curl -s -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/gists/375d0163df1ac31e855f24cba9ec952b")
+          
+          echo "Полученные данные из Gist: $gist_data"
 
-      - name: Деплой на сервер (если необходимо)
+          # Если данные пустые или ошибка, выводим ошибку
+          if [ -z "$gist_data" ]; then
+            echo "Ошибка получения данных из Gist!"
+            exit 1
+          fi
+
+          # Получаем текущую историю и статус
+          current_status=$(echo "$gist_data" | jq -r '.files["status.json"].content' || echo "{}")
+          current_history=$(echo "$gist_data" | jq -r '.files["history.json"].content' || echo "[]")
+
+          echo "Текущий статус: $current_status"
+          echo "Текущая история: $current_history"
+
+          # Формируем новые данные для отправки
+          new_status="🟢 Онлайн"
+          timestamp=$(date -Iseconds)
+          new_history=$(echo "$current_history" | jq ". | [{\"status\": \"$new_status\", \"time\": \"$timestamp\"}] + .")
+
+          echo "Обновленная история: $new_history"
+
+          # Отправляем обновления в Gist
+          response=$(curl -s -X PATCH "https://api.github.com/gists/375d0163df1ac31e855f24cba9ec952b" \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -d '{
+              "files": {
+                "status.json": {
+                  "content": "{\"status\": \"'$new_status'\"}"
+                },
+                "history.json": {
+                  "content": "'$new_history'"
+                }
+              }
+            }')
+
+          echo "Ответ от Gist API: $response"
+
+      - name: Деплой на сервер (если нужно)
         run: |
-          # Здесь можно добавить код для деплоя, если это нужно, например:
-          # rsync, scp или любые другие команды для деплоя
-          echo "Деплой на сервер завершён."
+          echo "Деплой завершен!"
