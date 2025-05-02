@@ -1,63 +1,50 @@
-name: Update Server Status
+name: Update Gist Status
 
 on:
   issues:
     types: [opened]
 
 jobs:
-  update_status:
-    runs-on: ubuntu-latest
+  update:
     if: contains(github.event.issue.body, 'Gist ID:')
-    
+    runs-on: ubuntu-latest
     steps:
-      - name: Extract status data
+      - name: Extract data
         id: extract
         run: |
-          GIST_ID=$(grep -oP 'Gist ID: \K[^\n]+' <<< "${{ github.event.issue.body }}")
-          STATUS=$(grep -oP 'New Status: \K[^\n]+' <<< "${{ github.event.issue.body }}")
+          GIST_ID=$(grep -oP 'Gist ID: \K.*' <<< "${{ github.event.issue.body }}")
+          STATUS=$(grep -oP 'New Status: \K.*' <<< "${{ github.event.issue.body }}")
           echo "gist_id=${GIST_ID}" >> $GITHUB_OUTPUT
           echo "status=${STATUS}" >> $GITHUB_OUTPUT
 
       - name: Update Gist
         env:
-          GH_TOKEN: ${{ secrets.GIST_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
-          # Обновляем status.json
-          curl -X PATCH \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Content-Type: application/json" \
+          # Получаем текущий Gist
+          RESPONSE=$(curl -s -H "Authorization: token $GH_TOKEN" \
+            "https://api.github.com/gists/${{ steps.extract.outputs.gist_id }}")
+          
+          # Извлекаем текущие данные
+          CURRENT_STATUS=$(echo "$RESPONSE" | jq -r '.files["status.json"].content' | jq -r '.status // ""')
+          HISTORY=$(echo "$RESPONSE" | jq -r '.files["history.json"].content // "[]"' | jq -r '.')
+          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          
+          # Обновляем историю
+          UPDATED_HISTORY=$(echo "$HISTORY" | jq --arg status "${{ steps.extract.outputs.status }}" --arg ts "$TIMESTAMP" \
+            '[{status: $status, timestamp: $ts}] + . | .[0:${{ env.HISTORY_LIMIT }}]')
+          
+          # Обновляем Gist
+          curl -X PATCH -H "Authorization: token $GH_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
             -d '{
               "files": {
                 "status.json": {
-                  "content": "{\"status\":\"${{ steps.extract.outputs.status }}\"}"
-                }
-              }
-            }' \
-            "https://api.github.com/gists/${{ steps.extract.outputs.gist_id }}"
-
-      - name: Update history
-        env:
-          GH_TOKEN: ${{ secrets.GIST_TOKEN }}
-        run: |
-          # Получаем текущую историю
-          HISTORY=$(curl -s -H "Authorization: token $GH_TOKEN" \
-            "https://api.github.com/gists/${{ steps.extract.outputs.gist_id }}" | \
-            jq -r '.files["history.json"].content // "[]"')
-          
-          # Добавляем новую запись
-          UPDATED_HISTORY=$(echo "$HISTORY" | \
-            jq --arg status "${{ steps.extract.outputs.status }}" \
-               --arg timestamp "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
-            '. |= [{"status": $status, "timestamp": $timestamp}] + .[:9]')
-          
-          # Сохраняем обновленную историю
-          curl -X PATCH \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "files": {
+                  "content": $(jq -n --arg status "${{ steps.extract.outputs.status }}" --arg ts "$TIMESTAMP" \
+                    '{status: $status, last_updated: $ts}')
+                },
                 "history.json": {
-                  "content": $UPDATED_HISTORY
+                  "content": $(echo "$UPDATED_HISTORY" | jq -c .)
                 }
               }
             }' \
@@ -65,10 +52,10 @@ jobs:
 
       - name: Close issue
         env:
-          GH_TOKEN: ${{ secrets.GIST_TOKEN }}
+          GH_TOKEN: ${{ secrets.GH_PAT }}
         run: |
           curl -X PATCH \
             -H "Authorization: token $GH_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"state":"closed"}' \
+            -H "Accept: application/vnd.github.v3+json" \
+            -d '{"state": "closed"}' \
             "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}"
