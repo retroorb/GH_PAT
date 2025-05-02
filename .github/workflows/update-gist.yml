@@ -1,61 +1,85 @@
-name: Update Gist Status
+name: Update Gist Status and HTML
 
 on:
-  issues:
-    types: [opened]
+  issues:
+    types: [opened]
 
 jobs:
-  update:
-    if: contains(github.event.issue.body, 'Gist ID:')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Extract data
-        id: extract
-        run: |
-          GIST_ID=$(grep -oP 'Gist ID: \K.*' <<< "${{ github.event.issue.body }}")
-          STATUS=$(grep -oP 'New Status: \K.*' <<< "${{ github.event.issue.body }}")
-          echo "gist_id=${GIST_ID}" >> $GITHUB_OUTPUT
-          echo "status=${STATUS}" >> $GITHUB_OUTPUT
+  update-status:
+    if: contains(github.event.issue.body, 'Gist ID:')
+    runs-on: ubuntu-latest
 
-      - name: Get current history
-        id: get_history
-        run: |
-          curl -s "https://gist.githubusercontent.com/${{ github.actor }}/${{ steps.extract.outputs.gist_id }}/raw/history.json" -o history.json || echo "[]" > history.json
-          echo "content<<EOF" >> $GITHUB_ENV
-          echo "$(cat history.json)" >> $GITHUB_ENV
-          echo "EOF" >> $GITHUB_ENV
+    steps:
+      - name: Extract status info
+        id: extract
+        run: |
+          GIST_ID=$(echo "${{ github.event.issue.body }}" | grep -oP 'Gist ID: \K.*')
+          STATUS=$(echo "${{ github.event.issue.body }}" | grep -oP 'New Status: \K.*')
+          echo "GIST_ID=$GIST_ID" >> $GITHUB_ENV
+          echo "STATUS=$STATUS" >> $GITHUB_ENV
 
-      - name: Append new entry to history
-        run: |
-          NEW_ENTRY="{\"time\":\"$(date -u +"%Y-%m-%d %H:%M:%S") UTC\",\"status\":\"${{ steps.extract.outputs.status }}\"}"
-          jq ". + [${NEW_ENTRY}]" history.json > new_history.json
+      - name: Download existing files from Gist
+        run: |
+          curl -s https://gist.githubusercontent.com/${{ github.actor }}/$GIST_ID/raw/status.json -o status.json || echo '{"status":"❔ Неизвестно"}' > status.json
+          curl -s https://gist.githubusercontent.com/${{ github.actor }}/$GIST_ID/raw/history.json -o history.json || echo '[]' > history.json
 
-      - name: Update Gist files
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          curl -X PATCH \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d @- https://api.github.com/gists/${{ steps.extract.outputs.gist_id }} <<EOF
-            {
-              "files": {
-                "status.json": {
-                  "content": "{\"status\":\"${{ steps.extract.outputs.status }}\"}"
-                },
-                "history.json": {
-                  "content": "$(cat new_history.json | jq -c .)"
-                }
-              }
-            }
+      - name: Update status.json and history.json
+        run: |
+          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          echo "{\"status\":\"$STATUS\",\"time\":\"$TIMESTAMP\"}" > status.json
+          jq ". + [{\"status\":\"$STATUS\",\"time\":\"$TIMESTAMP\"}]" history.json > updated_history.json
+          mv updated_history.json history.json
+
+      - name: Generate status.html
+        run: |
+          cat <<EOF > status.html
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Статус сервера</title>
+  <style>
+    body { font-family: Arial; text-align: center; padding: 20px; }
+    .status { font-size: 24px; margin: 10px; }
+    .online { color: green; }
+    .offline { color: red; }
+    ul { text-align: left; max-width: 400px; margin: 0 auto; }
+  </style>
+</head>
+<body>
+  <h1>Статус сервера</h1>
+  <div class="status">$STATUS</div>
+  <h2>История</h2>
+  <ul>
+$(jq -r '. | reverse | .[:5][] | "<li>" + .time + ": " + .status + "</li>"' history.json)
+  </ul>
+</body>
+</html>
 EOF
 
-      - name: Close issue
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT }}
-        run: |
-          curl -X PATCH \
-            -H "Authorization: token $GH_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"state":"closed"}' \
-            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}"
+      - name: Update Gist files
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          curl -X PATCH \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d @- https://api.github.com/gists/$GIST_ID <<EOF
+{
+  "files": {
+    "status.json": { "content": "$(cat status.json | jq -c .)" },
+    "history.json": { "content": "$(cat history.json | jq -c .)" },
+    "status.html": { "content": "$(cat status.html | sed 's/"/\\"/g' | tr '\n' ' ')" }
+  }
+}
+EOF
+
+      - name: Close issue
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          curl -X PATCH \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"state":"closed"}' \
+            "https://api.github.com/repos/${{ github.repository }}/issues/${{ github.event.issue.number }}"
