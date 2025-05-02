@@ -1,98 +1,41 @@
-name: Update Gist Status and HTML
+name: Обновление статуса сервера
 
 on:
-  issues:
-    types: [opened]
+  push:
+    branches:
+      - main  # Ветка, на которую пушатся изменения
+  workflow_dispatch:  # Позволяет запускать workflow вручную через интерфейс GitHub
 
 jobs:
   update-status:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Extract status info
-        id: extract
-        run: |
-          GIST_ID="375d0163df1ac31e855f24cba9ec952b"  # Здесь вставьте свой Gist ID
-          STATUS=$(echo "${{ github.event.issue.body }}" | grep -oP 'New Status: \K.*')
-          echo "GIST_ID=$GIST_ID" >> $GITHUB_ENV
-          echo "STATUS=$STATUS" >> $GITHUB_ENV
+      - name: Checkout репозиторий
+        uses: actions/checkout@v2
 
-      - name: Download existing files from Gist
+      - name: Настроить GitHub Token
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}  # Убедитесь, что ваш токен сохранён в GitHub Secrets как GH_PAT
         run: |
-          curl -s https://gist.githubusercontent.com/${{ github.actor }}/$GIST_ID/raw/status.json -o status.json || echo '{"status":"❔ Неизвестно"}' > status.json
-          curl -s https://gist.githubusercontent.com/${{ github.actor }}/$GIST_ID/raw/history.json -o history.json || echo '[]' > history.json
+          echo "GH_TOKEN=$GH_TOKEN" >> $GITHUB_ENV
 
-      - name: Check if status has changed
-        id: check_status
+      - name: Обновить статус в Gist
         run: |
-          CURRENT_STATUS=$(cat status.json | jq -r '.status')
-          if [ "$CURRENT_STATUS" == "$STATUS" ]; then
-            echo "Status has not changed, skipping update."
-            echo "skip_update=true" >> $GITHUB_ENV
-          else
-            echo "Status has changed, updating."
-            echo "skip_update=false" >> $GITHUB_ENV
-          fi
+          curl -X PATCH "https://api.github.com/gists/375d0163df1ac31e855f24cba9ec952b" \
+          -H "Authorization: Bearer $GH_TOKEN" \
+          -d '{
+                "files": {
+                  "status.json": {
+                    "content": "{\"status\": \"🟢 Онлайн\"}"
+                  },
+                  "history.json": {
+                    "content": "[{\"status\": \"🟢 Онлайн\", \"time\": \"'$(date -Iseconds)'\"}]"
+                  }
+                }
+              }'
 
-      - name: Update status.json and history.json if status changed
-        if: env.skip_update == 'false'
+      - name: Деплой на сервер (если необходимо)
         run: |
-          TIMESTAMP=$(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          echo "{\"status\":\"$STATUS\",\"time\":\"$TIMESTAMP\"}" > status.json
-          jq ". + [{\"status\":\"$STATUS\",\"time\":\"$TIMESTAMP\"}]" history.json > updated_history.json
-          mv updated_history.json history.json
-
-      - name: Generate status.html
-        run: |
-          cat <<EOF > status.html
-<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="UTF-8">
-  <title>Статус сервера</title>
-  <style>
-    body { font-family: Arial; text-align: center; padding: 20px; }
-    .status { font-size: 24px; margin: 10px; }
-    .online { color: green; }
-    .offline { color: red; }
-    ul { text-align: left; max-width: 400px; margin: 0 auto; }
-    button {
-      padding: 10px 20px;
-      margin-top: 20px;
-      font-size: 16px;
-      cursor: pointer;
-      border: none;
-      border-radius: 4px;
-      color: white;
-      background-color: #007bff;
-    }
-    button:hover {
-      background-color: #0056b3;
-    }
-  </style>
-</head>
-<body>
-  <h1>Статус сервера</h1>
-  <div class="status">$STATUS</div>
-  <button onclick="updateStatus('🟢 Онлайн')">Онлайн</button>
-  <button onclick="updateStatus('🔴 Оффлайн')">Оффлайн</button>
-  <h2>История</h2>
-  <ul>
-$(jq -r '. | reverse | .[:5][] | "<li>" + .time + ": " + .status + "</li>"' history.json)
-  </ul>
-  <script>
-    const GIST_ID = "375d0163df1ac31e855f24cba9ec952b";  // Gist ID
-    const GH_API_URL = "https://api.github.com/repos/retroorb/gist-status-updater/issues";
-    async function updateStatus(newStatus) {
-      const statusElement = document.querySelector(".status");
-      statusElement.textContent = "Обновление...";
-      try {
-        await fetch(GH_API_URL, {
-          method: 'POST',
-          headers: {
-            'Authorization': 'Bearer YOUR_GITHUB_TOKEN',  // Замените на ваш GitHub Token
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            title: `Status Update: ${newStatus}`,
-            body: `Gist ID: ${GIST_ID}\nNew Status
+          # Здесь можно добавить код для деплоя, если это нужно, например:
+          # rsync, scp или любые другие команды для деплоя
+          echo "Деплой на сервер завершён."
